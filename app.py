@@ -40,22 +40,23 @@ _store: dict[str, dict] = {}
 
 # ── Sample campaign (hardcoded for the demo) ─────────────────────────────────
 SAMPLE_POST = """\
-Excited to share that I just completed the {campaign_name} with {company_name}! 🚀
+In the AI era, the speed of advice matters.
 
-{post_body}
+Many companies do not lack information. They lack fast access to people who've already faced similar decisions.
 
-#LinkedIn #Community #Growth\
+AI is super fast, but it doesn't have real-life experience.
+
+Traditional consulting can be good, but it sometimes arrives outside the live decision window.
+
+Digital Advisory is designed for the space in between: fast access to experienced experts who can help pressure-test decisions while they are still being made.
+
+I am proud to be part of the Global Board at Digital Advisory and to support organisations looking for advice from people who have been there before.
+
+#DigitalAdvisory #Leadership #DecisionMaking #Strategy #AI #Advisory #ExecutiveLeadership\
 """
 
 SAMPLE_CAMPAIGN = {
-    "id":            "demo-campaign-001",
-    "campaign_name": "AI Innovation Sprint",
-    "company_name":  "Acme Corp",
-    "post_body": (
-        "This program pushed me to think differently about how we use AI in day-to-day work. "
-        "The sessions were packed with practical insights and the community we built is incredible. "
-        "If you're curious about what's next in enterprise AI, let's connect!"
-    ),
+    "id": "digital-advisory-001",
 }
 
 
