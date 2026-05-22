@@ -137,7 +137,7 @@ async def start(token: str):
         "client_id":     LI_CLIENT_ID,
         "redirect_uri":  LI_REDIRECT_URI,
         "state":         state,
-        "scope":         "w_member_social",
+        "scope":         "r_liteprofile w_member_social",
     }
     url = f"{LI_AUTH_URL}?{urllib.parse.urlencode(params)}"
     return RedirectResponse(url)
@@ -204,14 +204,17 @@ async def callback(code: str = None, state: str = None, error: str = None):
         if intro_resp.status_code == 200:
             intro = intro_resp.json()
             member["li_sub"] = intro.get("sub", "")
+            if not member["li_sub"]:
+                # sub absent — surface the full introspection body for diagnosis
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Token introspection succeeded but returned no sub. Body: {intro_resp.text}",
+                )
         else:
             raise HTTPException(
                 status_code=502,
-                detail=f"Could not resolve LinkedIn member ID (profile: {profile_resp.status_code}, introspect: {intro_resp.status_code}).",
+                detail=f"Profile {profile_resp.status_code}: {profile_resp.text[:200]} | Introspect {intro_resp.status_code}: {intro_resp.text[:200]}",
             )
-
-    if not member["li_sub"]:
-        raise HTTPException(status_code=502, detail="LinkedIn member ID is empty — cannot publish.")
 
     # Store access token and member info keyed by a new publish token
     publish_state = str(uuid.uuid4())
