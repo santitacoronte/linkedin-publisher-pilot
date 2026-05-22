@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: linkedin-publisher-pilot
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: LI_CLIENT_ID
+        sync: false
+      - key: LI_CLIENT_SECRET
+        sync: false
+      - key: LI_REDIRECT_URI
+        sync: false
+      - key: APP_SECRET
+        sync: false

@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Preview your post — LinkedIn Publisher</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  body {
+    font-family: system-ui, -apple-system, sans-serif;
+    background: #f3f4f6;
+    margin: 0;
+    padding: 24px 16px;
+    min-height: 100vh;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+  }
+  .container {
+    width: 100%;
+    max-width: 540px;
+  }
+  .header {
+    text-align: center;
+    margin-bottom: 24px;
+  }
+  .header h1 {
+    font-size: 1.5rem;
+    color: #111;
+    margin: 0 0 4px;
+  }
+  .header p {
+    color: #666;
+    margin: 0;
+    font-size: .95rem;
+  }
+  /* LinkedIn post card mock */
+  .li-card {
+    background: #fff;
+    border: 1px solid #dde;
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 20px;
+  }
+  .li-card-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+  .avatar {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: #0a66c2;
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.2rem;
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+  .li-card-meta strong {
+    display: block;
+    font-size: .95rem;
+    color: #111;
+  }
+  .li-card-meta span {
+    font-size: .82rem;
+    color: #888;
+  }
+  .li-card-body {
+    font-size: .95rem;
+    line-height: 1.65;
+    color: #333;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .actions {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .btn-publish {
+    background: #0a66c2;
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    padding: 14px;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    width: 100%;
+    transition: background .15s;
+  }
+  .btn-publish:hover { background: #004182; }
+  .btn-publish:active { background: #003375; }
+  .note {
+    font-size: .8rem;
+    color: #888;
+    text-align: center;
+    margin: 0;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <div class="header">
+    <h1>Review your post</h1>
+    <p>Hi {{ member.first_name }}! Here's what will be published to your LinkedIn feed.</p>
+  </div>
+
+  <div class="li-card">
+    <div class="li-card-header">
+      <div class="avatar">{{ member.first_name[0] | upper }}{{ member.last_name[0] | upper if member.last_name else '' }}</div>
+      <div class="li-card-meta">
+        <strong>{{ member.first_name }} {{ member.last_name }}</strong>
+        <span>LinkedIn Member · Just now</span>
+      </div>
+    </div>
+    <div class="li-card-body">{{ post_text }}</div>
+  </div>
+
+  <form class="actions" method="POST" action="/publish">
+    <input type="hidden" name="ps" value="{{ ps }}">
+    <button type="submit" class="btn-publish">Post to LinkedIn</button>
+    <p class="note">By clicking "Post to LinkedIn" you authorize this app to publish the above text on your behalf.</p>
+  </form>
+
+</div>
+</body>
+</html>
