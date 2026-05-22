@@ -28,11 +28,15 @@ LI_CLIENT_SECRET = os.getenv("LI_CLIENT_SECRET", "")
 LI_REDIRECT_URI  = os.getenv("LI_REDIRECT_URI", "http://localhost:8000/callback")
 APP_SECRET       = os.getenv("APP_SECRET", "demo-secret-change-me")
 
-LI_AUTH_URL      = "https://www.linkedin.com/oauth/v2/authorization"
-LI_TOKEN_URL     = "https://www.linkedin.com/oauth/v2/accessToken"
+LI_AUTH_URL       = "https://www.linkedin.com/oauth/v2/authorization"
+LI_TOKEN_URL      = "https://www.linkedin.com/oauth/v2/accessToken"
 LI_USERINFO_URL   = "https://api.linkedin.com/v2/userinfo"
 LI_INTROSPECT_URL = "https://www.linkedin.com/oauth/v2/introspectToken"
 LI_POSTS_URL      = "https://api.linkedin.com/rest/posts"
+LI_DOCS_URL       = "https://api.linkedin.com/rest/documents?action=initializeUpload"
+
+CAROUSEL_PDF      = os.path.join(os.path.dirname(__file__), "carrousel.pdf")
+CAROUSEL_TITLE    = "Digital Advisory — Speed of Advice"
 
 # ── In-memory state store (pilot only — not for production) ─────────────────
 # key: state UUID  →  value: dict with campaign + tokens
@@ -243,6 +247,13 @@ async def preview(ps: str, request: Request):
     })
 
 
+LI_HEADERS = {
+    "Content-Type":              "application/json",
+    "X-Restli-Protocol-Version": "2.0.0",
+    "LinkedIn-Version":          "202401",
+}
+
+
 @app.post("/publish")
 async def publish(request: Request):
     form = await request.form()
@@ -253,37 +264,68 @@ async def publish(request: Request):
 
     session      = _store[ps]
     access_token = session["access_token"]
-    campaign     = SAMPLE_CAMPAIGN
     member       = session["member"]
-    post_text    = _interpolate(SAMPLE_POST, campaign, member)
+    author_urn   = f"urn:li:person:{member['li_sub']}"
+    post_text    = _interpolate(SAMPLE_POST, SAMPLE_CAMPAIGN, member)
+    auth_headers = {**LI_HEADERS, "Authorization": f"Bearer {access_token}"}
 
+    # ── Step 1: initialise document upload ──────────────────────────────────
+    async with httpx.AsyncClient() as client:
+        init_resp = await client.post(
+            LI_DOCS_URL,
+            json={"initializeUploadRequest": {"owner": author_urn}},
+            headers=auth_headers,
+        )
+
+    if init_resp.status_code not in (200, 201):
+        raise HTTPException(status_code=502, detail=f"Document init failed: {init_resp.text}")
+
+    init_data    = init_resp.json().get("value", {})
+    upload_url   = init_data.get("uploadUrl", "")
+    document_urn = init_data.get("document", "")
+
+    if not upload_url or not document_urn:
+        raise HTTPException(status_code=502, detail=f"Missing upload fields: {init_resp.text}")
+
+    # ── Step 2: upload the PDF binary ────────────────────────────────────────
+    with open(CAROUSEL_PDF, "rb") as fh:
+        pdf_bytes = fh.read()
+
+    async with httpx.AsyncClient(timeout=60) as client:
+        upload_resp = await client.put(
+            upload_url,
+            content=pdf_bytes,
+            headers={"Content-Type": "application/octet-stream"},
+        )
+
+    if upload_resp.status_code not in (200, 201):
+        raise HTTPException(status_code=502, detail=f"PDF upload failed ({upload_resp.status_code}): {upload_resp.text[:300]}")
+
+    # ── Step 3: create the post with document carousel ───────────────────────
     payload = {
-        "author":     f"urn:li:person:{member['li_sub']}",
+        "author":     author_urn,
         "commentary": post_text,
         "visibility": "PUBLIC",
         "distribution": {
-            "feedDistribution": "MAIN_FEED",
-            "targetEntities":   [],
+            "feedDistribution":              "MAIN_FEED",
+            "targetEntities":                [],
             "thirdPartyDistributionChannels": [],
         },
-        "lifecycleState": "PUBLISHED",
+        "content": {
+            "document": {
+                "source": document_urn,
+                "title":  CAROUSEL_TITLE,
+            }
+        },
+        "lifecycleState":          "PUBLISHED",
         "isReshareDisabledByAuthor": False,
     }
 
     async with httpx.AsyncClient() as client:
-        resp = await client.post(
-            LI_POSTS_URL,
-            json=payload,
-            headers={
-                "Authorization":    f"Bearer {access_token}",
-                "Content-Type":     "application/json",
-                "X-Restli-Protocol-Version": "2.0.0",
-                "LinkedIn-Version": "202401",
-            },
-        )
+        resp = await client.post(LI_POSTS_URL, json=payload, headers=auth_headers)
 
     if resp.status_code not in (200, 201):
-        raise HTTPException(status_code=502, detail=f"LinkedIn API error: {resp.text}")
+        raise HTTPException(status_code=502, detail=f"LinkedIn post failed: {resp.text}")
 
     post_id = resp.headers.get("x-restli-id", "")
     del _store[ps]
