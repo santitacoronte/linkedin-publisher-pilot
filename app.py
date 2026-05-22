@@ -256,6 +256,16 @@ LI_HEADERS = {
 
 @app.post("/publish")
 async def publish(request: Request):
+    try:
+        return await _do_publish(request)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        import traceback
+        raise HTTPException(status_code=500, detail=traceback.format_exc())
+
+
+async def _do_publish(request: Request):
     form = await request.form()
     ps   = form.get("ps")
 
@@ -270,7 +280,7 @@ async def publish(request: Request):
     auth_headers = {**LI_HEADERS, "Authorization": f"Bearer {access_token}"}
 
     # ── Step 1: initialise document upload ──────────────────────────────────
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=30) as client:
         init_resp = await client.post(
             LI_DOCS_URL,
             json={"initializeUploadRequest": {"owner": author_urn}},
@@ -321,7 +331,7 @@ async def publish(request: Request):
         "isReshareDisabledByAuthor": False,
     }
 
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.post(LI_POSTS_URL, json=payload, headers=auth_headers)
 
     if resp.status_code not in (200, 201):
