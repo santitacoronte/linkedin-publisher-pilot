@@ -30,7 +30,7 @@ APP_SECRET       = os.getenv("APP_SECRET", "demo-secret-change-me")
 
 LI_AUTH_URL      = "https://www.linkedin.com/oauth/v2/authorization"
 LI_TOKEN_URL     = "https://www.linkedin.com/oauth/v2/accessToken"
-LI_ME_URL         = "https://api.linkedin.com/v2/me"
+LI_USERINFO_URL   = "https://api.linkedin.com/v2/userinfo"
 LI_INTROSPECT_URL = "https://www.linkedin.com/oauth/v2/introspectToken"
 LI_POSTS_URL      = "https://api.linkedin.com/rest/posts"
 
@@ -137,7 +137,7 @@ async def start(token: str):
         "client_id":     LI_CLIENT_ID,
         "redirect_uri":  LI_REDIRECT_URI,
         "state":         state,
-        "scope":         "r_liteprofile w_member_social",
+        "scope":         "openid profile w_member_social",
     }
     url = f"{LI_AUTH_URL}?{urllib.parse.urlencode(params)}"
     return RedirectResponse(url)
@@ -168,53 +168,30 @@ async def callback(code: str = None, state: str = None, error: str = None):
     token_data = resp.json()
     access_token = token_data["access_token"]
 
-    # Fetch member profile (name + ID)
-    # Try /v2/me first; fall back to token introspection if scope doesn't allow it.
-    def _localised(obj: dict) -> str:
-        loc = obj.get("localized", {})
-        return next(iter(loc.values()), "") if loc else ""
-
-    member = {"first_name": "there", "last_name": "", "li_sub": ""}
-
+    # Fetch member profile via OpenID Connect userinfo endpoint.
+    # Requires: openid + profile scopes (granted by "Sign In with LinkedIn using OpenID Connect" product).
+    # Returns: sub (member ID), given_name, family_name
     async with httpx.AsyncClient() as client:
         profile_resp = await client.get(
-            LI_ME_URL,
+            LI_USERINFO_URL,
             headers={"Authorization": f"Bearer {access_token}"},
         )
 
-    if profile_resp.status_code == 200:
-        profile = profile_resp.json()
-        member = {
-            "first_name": _localised(profile.get("firstName", {})) or "there",
-            "last_name":  _localised(profile.get("lastName", {})),
-            "li_sub":     profile.get("id", ""),
-        }
-    else:
-        # /v2/me requires r_liteprofile; fall back to token introspection to get the member ID.
-        async with httpx.AsyncClient() as client:
-            intro_resp = await client.post(
-                LI_INTROSPECT_URL,
-                data={
-                    "client_id":     LI_CLIENT_ID,
-                    "client_secret": LI_CLIENT_SECRET,
-                    "token":         access_token,
-                },
-                headers={"Content-Type": "application/x-www-form-urlencoded"},
-            )
-        if intro_resp.status_code == 200:
-            intro = intro_resp.json()
-            member["li_sub"] = intro.get("sub", "")
-            if not member["li_sub"]:
-                # sub absent — surface the full introspection body for diagnosis
-                raise HTTPException(
-                    status_code=502,
-                    detail=f"Token introspection succeeded but returned no sub. Body: {intro_resp.text}",
-                )
-        else:
-            raise HTTPException(
-                status_code=502,
-                detail=f"Profile {profile_resp.status_code}: {profile_resp.text[:200]} | Introspect {intro_resp.status_code}: {intro_resp.text[:200]}",
-            )
+    if profile_resp.status_code != 200:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Could not fetch LinkedIn profile ({profile_resp.status_code}): {profile_resp.text[:300]}",
+        )
+
+    profile = profile_resp.json()
+    member = {
+        "first_name": profile.get("given_name") or "there",
+        "last_name":  profile.get("family_name") or "",
+        "li_sub":     profile.get("sub", ""),
+    }
+
+    if not member["li_sub"]:
+        raise HTTPException(status_code=502, detail=f"No member sub in userinfo response: {profile_resp.text[:300]}")
 
     # Store access token and member info keyed by a new publish token
     publish_state = str(uuid.uuid4())
