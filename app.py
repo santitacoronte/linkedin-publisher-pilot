@@ -138,6 +138,7 @@ async def start(token: str):
         "redirect_uri":  LI_REDIRECT_URI,
         "state":         state,
         "scope":         "openid profile w_member_social",
+        "prompt":        "consent",
     }
     url = f"{LI_AUTH_URL}?{urllib.parse.urlencode(params)}"
     return RedirectResponse(url)
