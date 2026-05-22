@@ -137,7 +137,7 @@ async def start(token: str):
         "client_id":     LI_CLIENT_ID,
         "redirect_uri":  LI_REDIRECT_URI,
         "state":         state,
-        "scope":         "openid profile w_member_social",
+        "scope":         "w_member_social",
     }
     url = f"{LI_AUTH_URL}?{urllib.parse.urlencode(params)}"
     return RedirectResponse(url)
@@ -168,30 +168,47 @@ async def callback(code: str = None, state: str = None, error: str = None):
     token_data = resp.json()
     access_token = token_data["access_token"]
 
-    # Fetch member profile via OpenID Connect userinfo endpoint.
-    # Requires: openid + profile scopes (granted by "Sign In with LinkedIn using OpenID Connect" product).
-    # Returns: sub (member ID), given_name, family_name
+    # Step 1: token introspection — works with any scope, reveals member sub if available
     async with httpx.AsyncClient() as client:
-        profile_resp = await client.get(
+        intro_resp = await client.post(
+            LI_INTROSPECT_URL,
+            data={
+                "client_id":     LI_CLIENT_ID,
+                "client_secret": LI_CLIENT_SECRET,
+                "token":         access_token,
+            },
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+
+    intro = intro_resp.json() if intro_resp.status_code == 200 else {}
+    li_sub = intro.get("sub", "")
+
+    # Step 2: userinfo endpoint (needs openid+profile — add "Sign In with LinkedIn using OpenID Connect" product)
+    member = {"first_name": "there", "last_name": "", "li_sub": li_sub}
+
+    async with httpx.AsyncClient() as client:
+        userinfo_resp = await client.get(
             LI_USERINFO_URL,
             headers={"Authorization": f"Bearer {access_token}"},
         )
 
-    if profile_resp.status_code != 200:
-        raise HTTPException(
-            status_code=502,
-            detail=f"Could not fetch LinkedIn profile ({profile_resp.status_code}): {profile_resp.text[:300]}",
-        )
-
-    profile = profile_resp.json()
-    member = {
-        "first_name": profile.get("given_name") or "there",
-        "last_name":  profile.get("family_name") or "",
-        "li_sub":     profile.get("sub", ""),
-    }
+    if userinfo_resp.status_code == 200:
+        profile = userinfo_resp.json()
+        member = {
+            "first_name": profile.get("given_name") or "there",
+            "last_name":  profile.get("family_name") or "",
+            "li_sub":     profile.get("sub") or li_sub,
+        }
 
     if not member["li_sub"]:
-        raise HTTPException(status_code=502, detail=f"No member sub in userinfo response: {profile_resp.text[:300]}")
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                f"Cannot resolve LinkedIn member ID. "
+                f"Introspect ({intro_resp.status_code}): {intro_resp.text[:200]} | "
+                f"Userinfo ({userinfo_resp.status_code}): {userinfo_resp.text[:200]}"
+            ),
+        )
 
     # Store access token and member info keyed by a new publish token
     publish_state = str(uuid.uuid4())
