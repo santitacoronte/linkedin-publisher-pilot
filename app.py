@@ -137,7 +137,7 @@ async def start(token: str):
         "client_id":     LI_CLIENT_ID,
         "redirect_uri":  LI_REDIRECT_URI,
         "state":         state,
-        "scope":         "w_member_social",
+        "scope":         "openid profile w_member_social",
     }
     url = f"{LI_AUTH_URL}?{urllib.parse.urlencode(params)}"
     return RedirectResponse(url)
