@@ -30,8 +30,9 @@ APP_SECRET       = os.getenv("APP_SECRET", "demo-secret-change-me")
 
 LI_AUTH_URL      = "https://www.linkedin.com/oauth/v2/authorization"
 LI_TOKEN_URL     = "https://www.linkedin.com/oauth/v2/accessToken"
-LI_ME_URL        = "https://api.linkedin.com/v2/me?projection=(id,firstName,lastName)"
-LI_POSTS_URL     = "https://api.linkedin.com/rest/posts"
+LI_ME_URL         = "https://api.linkedin.com/v2/me"
+LI_INTROSPECT_URL = "https://www.linkedin.com/oauth/v2/introspectToken"
+LI_POSTS_URL      = "https://api.linkedin.com/rest/posts"
 
 # ── In-memory state store (pilot only — not for production) ─────────────────
 # key: state UUID  →  value: dict with campaign + tokens
@@ -168,26 +169,49 @@ async def callback(code: str = None, state: str = None, error: str = None):
     access_token = token_data["access_token"]
 
     # Fetch member profile (name + ID)
+    # Try /v2/me first; fall back to token introspection if scope doesn't allow it.
+    def _localised(obj: dict) -> str:
+        loc = obj.get("localized", {})
+        return next(iter(loc.values()), "") if loc else ""
+
+    member = {"first_name": "there", "last_name": "", "li_sub": ""}
+
     async with httpx.AsyncClient() as client:
         profile_resp = await client.get(
             LI_ME_URL,
             headers={"Authorization": f"Bearer {access_token}"},
         )
 
-    if profile_resp.status_code != 200:
-        raise HTTPException(status_code=502, detail="Could not fetch LinkedIn profile.")
+    if profile_resp.status_code == 200:
+        profile = profile_resp.json()
+        member = {
+            "first_name": _localised(profile.get("firstName", {})) or "there",
+            "last_name":  _localised(profile.get("lastName", {})),
+            "li_sub":     profile.get("id", ""),
+        }
+    else:
+        # /v2/me requires r_liteprofile; fall back to token introspection to get the member ID.
+        async with httpx.AsyncClient() as client:
+            intro_resp = await client.post(
+                LI_INTROSPECT_URL,
+                data={
+                    "client_id":     LI_CLIENT_ID,
+                    "client_secret": LI_CLIENT_SECRET,
+                    "token":         access_token,
+                },
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+        if intro_resp.status_code == 200:
+            intro = intro_resp.json()
+            member["li_sub"] = intro.get("sub", "")
+        else:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Could not resolve LinkedIn member ID (profile: {profile_resp.status_code}, introspect: {intro_resp.status_code}).",
+            )
 
-    profile = profile_resp.json()
-    # v2/me returns localised name objects, e.g. firstName.localized.en_US
-    def _localised(obj: dict) -> str:
-        loc = obj.get("localized", {})
-        return next(iter(loc.values()), "") if loc else ""
-
-    member = {
-        "first_name": _localised(profile.get("firstName", {})) or "there",
-        "last_name":  _localised(profile.get("lastName", {})),
-        "li_sub":     profile.get("id", ""),
-    }
+    if not member["li_sub"]:
+        raise HTTPException(status_code=502, detail="LinkedIn member ID is empty — cannot publish.")
 
     # Store access token and member info keyed by a new publish token
     publish_state = str(uuid.uuid4())
