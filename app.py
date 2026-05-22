@@ -30,7 +30,7 @@ APP_SECRET       = os.getenv("APP_SECRET", "demo-secret-change-me")
 
 LI_AUTH_URL      = "https://www.linkedin.com/oauth/v2/authorization"
 LI_TOKEN_URL     = "https://www.linkedin.com/oauth/v2/accessToken"
-LI_USERINFO_URL  = "https://api.linkedin.com/v2/userinfo"
+LI_ME_URL        = "https://api.linkedin.com/v2/me?projection=(id,firstName,lastName)"
 LI_POSTS_URL     = "https://api.linkedin.com/rest/posts"
 
 # ── In-memory state store (pilot only — not for production) ─────────────────
@@ -136,7 +136,7 @@ async def start(token: str):
         "client_id":     LI_CLIENT_ID,
         "redirect_uri":  LI_REDIRECT_URI,
         "state":         state,
-        "scope":         "openid profile w_member_social",
+        "scope":         "w_member_social",
     }
     url = f"{LI_AUTH_URL}?{urllib.parse.urlencode(params)}"
     return RedirectResponse(url)
@@ -167,10 +167,10 @@ async def callback(code: str = None, state: str = None, error: str = None):
     token_data = resp.json()
     access_token = token_data["access_token"]
 
-    # Fetch member profile (name)
+    # Fetch member profile (name + ID)
     async with httpx.AsyncClient() as client:
         profile_resp = await client.get(
-            LI_USERINFO_URL,
+            LI_ME_URL,
             headers={"Authorization": f"Bearer {access_token}"},
         )
 
@@ -178,10 +178,15 @@ async def callback(code: str = None, state: str = None, error: str = None):
         raise HTTPException(status_code=502, detail="Could not fetch LinkedIn profile.")
 
     profile = profile_resp.json()
+    # v2/me returns localised name objects, e.g. firstName.localized.en_US
+    def _localised(obj: dict) -> str:
+        loc = obj.get("localized", {})
+        return next(iter(loc.values()), "") if loc else ""
+
     member = {
-        "first_name": profile.get("given_name", "there"),
-        "last_name":  profile.get("family_name", ""),
-        "li_sub":     profile.get("sub", ""),
+        "first_name": _localised(profile.get("firstName", {})) or "there",
+        "last_name":  _localised(profile.get("lastName", {})),
+        "li_sub":     profile.get("id", ""),
     }
 
     # Store access token and member info keyed by a new publish token
